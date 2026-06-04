@@ -76,6 +76,11 @@ class EmbedWorker(QThread):
             result.ai.extra["lsbmr_key"] = stego_ai.extra.get("lsbmr_key")
             result.natural.extra["lsbmr_key"] = stego_natural.extra.get("lsbmr_key")
 
+            result.ai.extra["message"] = self.message
+            result.natural.extra["message"] = self.message
+            result.ai.extra["channel_idx"] = self.kwargs.get("channel_idx", 0)
+            result.natural.extra["channel_idx"] = self.kwargs.get("channel_idx", 0)
+
             self.progress.emit(100)
             self.finished.emit(result)
 

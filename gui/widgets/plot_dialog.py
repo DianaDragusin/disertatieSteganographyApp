@@ -6,6 +6,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from scipy.stats import pearsonr
 from core.models import ComparisonResult
+from extraction_tracking import build_extraction_report, render_extraction_map
 
 
 class PlotDialog(QDialog):
@@ -78,6 +79,12 @@ class PlotDialog(QDialog):
         canvas4 = self._create_metric_comparison_canvas()
         tab4_layout.addWidget(canvas4)
         tabs.addTab(tab4, "Metric Comparison")
+
+        # Tab: Extraction Map
+        tab_extract = QWidget()
+        tab_extract_layout = QVBoxLayout(tab_extract)
+        tab_extract_layout.addWidget(self._create_extraction_map_canvas())
+        tabs.addTab(tab_extract, "Extraction Map")
         
         # Tab 5: Channel Correlation (only for color images)
         if not self.is_grayscale:
@@ -87,7 +94,7 @@ class PlotDialog(QDialog):
             tab5_layout.addWidget(canvas5)
             tabs.addTab(tab5, "Channel Correlation")
         
-        layout.addWidget(tabs)
+        layout.addWidget(tabs)  
         self.setLayout(layout)
     
     def _create_difference_heatmap_canvas(self) -> FigureCanvas:
@@ -119,6 +126,34 @@ class PlotDialog(QDialog):
         
         canvas = FigureCanvas(figure)
         return canvas
+
+    def _create_extraction_map_canvas(self) -> FigureCanvas:
+        figure = Figure(figsize=(12, 6), dpi=100)
+        panels = [
+            ("AI", self.ai_stego, self.result.ai.extra, 121),
+            ("Natural", self.natural_stego, self.result.natural.extra, 122),
+        ]
+        for label, stego, extra, pos in panels:
+            ax = figure.add_subplot(pos)
+            try:
+                message = extra.get("message")
+                if not message:
+                    raise ValueError("No message stored from embedding.")
+                report = build_extraction_report(
+                    self.strategy_name, stego, message,
+                    coordinate_key=extra.get("lsbmr_key"),
+                    channel_idx=extra.get("channel_idx", 0),
+                )
+                render_extraction_map(ax, stego, report, title=label)
+            except Exception as e:
+                ax.imshow(
+                    cv2.cvtColor(stego, cv2.COLOR_BGR2GRAY) if stego.ndim == 3 else stego,
+                    cmap="gray", vmin=0, vmax=255,
+                )
+                ax.set_title(f"{label}: extraction map unavailable\n{e}", fontsize=9)
+                ax.axis("off")
+        figure.tight_layout()
+        return FigureCanvas(figure)
     
     def _create_histogram_canvas(self) -> FigureCanvas:
         """Create histogram of neighbor pixel differences (cover vs stego)."""

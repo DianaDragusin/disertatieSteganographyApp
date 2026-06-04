@@ -67,6 +67,15 @@ class MetricsTableWidget(QWidget):
             self.table.setItem(i, 0, item)
         
         layout.addWidget(self.table)
+
+        self.caption = QLabel("")
+        self.caption.setWordWrap(True)
+        caption_font = QFont()
+        caption_font.setPointSize(8)
+        self.caption.setFont(caption_font)
+        self.caption.setStyleSheet("color: gray;")
+        layout.addWidget(self.caption)
+
         self.setLayout(layout)
     
     def update_results(self, result: ComparisonResult):
@@ -76,7 +85,9 @@ class MetricsTableWidget(QWidget):
         Args:
             result: ComparisonResult with AI and natural metrics
         """
+        scores = result.composite_scores()
         self.comparison_result = result
+        
         
         # Format chi2_mean values
         ai_chi2 = result.ai.extra.get("chi2_mean")
@@ -99,7 +110,7 @@ class MetricsTableWidget(QWidget):
             (f"{result.ai.entropy:.4f}", f"{result.natural.entropy:.4f}"),
             (ai_chi2_str, nat_chi2_str),
             (ai_rs_str, nat_rs_str),
-            (f"{result.ai.composite_score():.6f}", f"{result.natural.composite_score():.6f}"),
+            (f"{scores['ai_composite']:.6f}", f"{scores['natural_composite']:.6f}"),
         ]
         
         # Fill in metric values
@@ -138,6 +149,12 @@ class MetricsTableWidget(QWidget):
         self.table.setItem(8, 2, natural_winner_item)
         
         self.table.resizeRowsToContents()
+
+        self.table.setItem(8, 1, ai_winner_item)
+        self.table.setItem(8, 2, natural_winner_item)
+
+        self.table.resizeRowsToContents()
+        self.caption.setText(result.formula_caption())     # <-- add this
     
     def clear(self):
         """Clear all data."""
