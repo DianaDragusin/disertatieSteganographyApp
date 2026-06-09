@@ -22,42 +22,37 @@ class MetricsTableWidget(QWidget):
     def init_ui(self):
         """Initialize UI layout."""
         layout = QVBoxLayout()
-        
-        # Title
+
+        # Title (smaller than before)
         title = QLabel("Comparison Results")
         title_font = QFont()
-        title_font.setPointSize(14)
+        title_font.setPointSize(11)
         title_font.setBold(True)
         title.setFont(title_font)
         layout.addWidget(title)
-        
+
         # Create table with 3 columns: Metric, AI, Natural
         self.table = QTableWidget()
         self.table.setColumnCount(3)
         self.table.setHorizontalHeaderLabels(["Metric", "AI Image", "Natural Image"])
-        
-        # Set column widths
+
+        # Compact appearance
+        table_font = QFont()
+        table_font.setPointSize(9)
+        self.table.setFont(table_font)
+        self.table.verticalHeader().setVisible(False)   # hide row-number column
+
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        
-        # Set row count
+
         self.table.setRowCount(9)  # 8 metrics + 1 winner row
-        
-        # Populate metric labels
+
         metrics = [
-            "PSNR (dB)",
-            "SSIM",
-            "MSE",
-            "BPP",
-            "Entropy",
-            "Chi² (avg)",
-            "RS Estimate P̂",
-            "Composite Score",
-            "🏆 Best at Hiding"
+            "PSNR (dB)", "SSIM", "MSE", "BPP", "Entropy",
+            "Chi² (avg)", "RS Estimate P̂", "Composite Score", "🏆 Best at Hiding",
         ]
-        
         for i, metric in enumerate(metrics):
             item = QTableWidgetItem(metric)
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -65,7 +60,7 @@ class MetricsTableWidget(QWidget):
             item_font.setBold(True)
             item.setFont(item_font)
             self.table.setItem(i, 0, item)
-        
+
         layout.addWidget(self.table)
 
         self.caption = QLabel("")
@@ -77,7 +72,7 @@ class MetricsTableWidget(QWidget):
         layout.addWidget(self.caption)
 
         self.setLayout(layout)
-    
+        
     def update_results(self, result: ComparisonResult):
         """
         Update display with new comparison results.
@@ -154,7 +149,7 @@ class MetricsTableWidget(QWidget):
         self.table.setItem(8, 2, natural_winner_item)
 
         self.table.resizeRowsToContents()
-        self.caption.setText(result.formula_caption())     # <-- add this
+        self.caption.setText(result.formula_caption())     
     
     def clear(self):
         """Clear all data."""

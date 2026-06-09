@@ -18,48 +18,47 @@ class RightPanel(QWidget):
     def init_ui(self):
         """Initialize UI."""
         layout = QVBoxLayout()
-        
+
         tabs = QTabWidget()
-        
+
         # Metrics tab
         self.metrics_table = MetricsTableWidget()
         tabs.addTab(self.metrics_table, "Metrics")
-        
+
         # Extraction tab
         extract_widget = QWidget()
         extract_layout = QVBoxLayout(extract_widget)
-        
+
         extract_title = QLabel("Extraction Results")
         extract_title.setFont(QFont("Arial", 11, QFont.Weight.Bold))
         extract_layout.addWidget(extract_title)
-        
+
         extract_result_label = QLabel("Extracted from Natural:")
         extract_layout.addWidget(extract_result_label)
-        
+
         self.extract_natural_text = QTextEdit()
         self.extract_natural_text.setReadOnly(True)
-        self.extract_natural_text.setFixedHeight(60)
-        extract_layout.addWidget(self.extract_natural_text)
-        
+        self.extract_natural_text.setMinimumHeight(120)
+        extract_layout.addWidget(self.extract_natural_text, 1)   # expands
+
         self.match_natural_label = QLabel("Match: ✗")
         self.match_natural_label.setStyleSheet("color: red; font-weight: bold;")
         extract_layout.addWidget(self.match_natural_label)
-        
+
         extract_result_label2 = QLabel("Extracted from AI:")
         extract_layout.addWidget(extract_result_label2)
-        
+
         self.extract_ai_text = QTextEdit()
         self.extract_ai_text.setReadOnly(True)
-        self.extract_ai_text.setFixedHeight(60)
-        extract_layout.addWidget(self.extract_ai_text)
-        
+        self.extract_ai_text.setMinimumHeight(120)
+        extract_layout.addWidget(self.extract_ai_text, 1)        # expands
+
         self.match_ai_label = QLabel("Match: ✗")
         self.match_ai_label.setStyleSheet("color: red; font-weight: bold;")
         extract_layout.addWidget(self.match_ai_label)
-        
-        extract_layout.addStretch()
+
         tabs.addTab(extract_widget, "Extraction")
-        
+
         layout.addWidget(tabs)
         self.setLayout(layout)
     

@@ -59,12 +59,19 @@ class PlotDialog(QDialog):
         tab1_layout.addWidget(canvas1)
         tabs.addTab(tab1, "Difference Heatmap")
         
-        # Tab 2: Pair-Difference Histogram
+        # Tab 2: Pixel Frequency Histogram
         tab2 = QWidget()
         tab2_layout = QVBoxLayout(tab2)
         canvas2 = self._create_histogram_canvas()
         tab2_layout.addWidget(canvas2)
-        tabs.addTab(tab2, "Pair-Difference Histogram")
+        tabs.addTab(tab2, "Pixel Frequency Histogram")
+
+
+        # --- NEW TAB: RS Group Differences ---
+        tab_rs_diff = QWidget()
+        tab_rs_diff_layout = QVBoxLayout(tab_rs_diff)
+        tab_rs_diff_layout.addWidget(self._create_rs_group_differences_canvas())
+        tabs.addTab(tab_rs_diff, "RS Group Differences")
         
         # Tab 3: Channel Modification
         tab3 = QWidget()
@@ -72,13 +79,6 @@ class PlotDialog(QDialog):
         canvas3 = self._create_channel_modification_canvas()
         tab3_layout.addWidget(canvas3)
         tabs.addTab(tab3, "Channel Modification")
-        
-        # Tab 4: Metric Comparison
-        tab4 = QWidget()
-        tab4_layout = QVBoxLayout(tab4)
-        canvas4 = self._create_metric_comparison_canvas()
-        tab4_layout.addWidget(canvas4)
-        tabs.addTab(tab4, "Metric Comparison")
 
         # Tab: Extraction Map
         tab_extract = QWidget()
@@ -156,56 +156,76 @@ class PlotDialog(QDialog):
         return FigureCanvas(figure)
     
     def _create_histogram_canvas(self) -> FigureCanvas:
-        """Create histogram of neighbor pixel differences (cover vs stego)."""
+        """
+        Pixel value histogram, before vs after embedding.
+
+        For each panel (AI vs Natural) it overlays two intensity histograms:
+          - gray (filled)  : the cover values, BEFORE embedding
+          - colour (line)  : the stego values, AFTER embedding
+
+        So you can read how the value counts shift once the payload is written.
+
+        The analysis plane depends on the strategy:
+          - grayscale strategies (PVD)            -> the grayscale plane
+          - LSBMR                                 -> the single channel the
+                                                     payload was embedded into
+          - other colour strategies (LSB Random,
+            Canny-Sobel)                          -> the luminance plane
+        """
         figure = Figure(figsize=(12, 5), dpi=100)
-        
-        # Helper function to compute neighbor differences
-        def compute_neighbor_diffs(img):
-            """Compute horizontal neighbor differences for an image."""
-            if img.ndim == 3:
-                img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            diffs = np.abs(img[:, 1:].astype(np.int16) - img[:, :-1].astype(np.int16)).flatten()
-            return diffs
-        
-        # AI subplot
+
+        BEFORE_COLOR = "#9e9e9e"  # gray: cover (before)
+        AFTER_COLOR = "#e67e22"   # orange: stego (after)
+
+        name = (self.strategy_name or "").lower()
+        is_lsbmr = "lsbmr" in name
+        ch_names = {0: "blue", 1: "green", 2: "red"}  # OpenCV BGR order
+
+        def plane_of(arr, extra):
+            """Return (intensity_plane_2d, label) for this strategy."""
+            if arr.ndim == 2:
+                return arr, "grayscale"
+            if is_lsbmr:
+                ch = int(extra.get("channel_idx", 0))
+                return arr[:, :, ch], ch_names.get(ch, f"ch{ch}")
+            return cv2.cvtColor(arr, cv2.COLOR_BGR2GRAY), "luminance"
+
+        def panel(ax, cover, stego, extra, title):
+            cov_plane, sub = plane_of(cover, extra)
+            ste_plane, _ = plane_of(stego, extra)
+            bins = np.arange(0, 257)  # one bin per intensity value 0..255
+            centers = (bins[:-1] + bins[1:]) / 2
+
+            # Cover: filled gray bars (the "how many pixels have each value")
+            ax.hist(cov_plane.ravel(), bins=bins, color=BEFORE_COLOR,
+                    label="Before (cover)")
+
+            # Stego: orange outline on top (the values after embedding)
+            counts_after, _ = np.histogram(ste_plane.ravel(), bins=bins)
+            ax.step(centers, counts_after, where='mid', color=AFTER_COLOR,
+                    linewidth=1.2, label="After (stego)")
+
+            ax.set_title(f"{title}  ({sub})", fontsize=11, fontweight='bold')
+            ax.set_xlabel("Pixel intensity", fontsize=10)
+            ax.set_ylabel("Frequency (pixel count)", fontsize=10)
+            ax.set_xlim(0, 255)
+            ax.legend(fontsize=9)
+            ax.grid(True, alpha=0.3, axis='y')
+
         ax_ai = figure.add_subplot(121)
-        ai_cover_diffs = compute_neighbor_diffs(self.ai_cover)
-        ai_stego_diffs = compute_neighbor_diffs(self.ai_stego)
-        
-        counts_cover, bins = np.histogram(ai_cover_diffs, bins=np.arange(0, 65), density=True)
-        counts_stego, _ = np.histogram(ai_stego_diffs, bins=np.arange(0, 65), density=True)
-        bin_centers = (bins[:-1] + bins[1:]) / 2
-        
-        ax_ai.plot(bin_centers, counts_cover, color=self.COVER_COLOR, label="Cover", linewidth=2)
-        ax_ai.plot(bin_centers, counts_stego, color=self.STEGO_COLOR, label="Stego", linewidth=2)
-        ax_ai.set_title("AI Image", fontsize=11, fontweight='bold')
-        ax_ai.set_xlabel("Pixel pair difference", fontsize=10)
-        ax_ai.set_ylabel("Density", fontsize=10)
-        ax_ai.legend(fontsize=9)
-        ax_ai.grid(True, alpha=0.3)
-        
-        # Natural subplot
+        panel(ax_ai, self.ai_cover, self.ai_stego, self.result.ai.extra, "AI Image")
+
         ax_nat = figure.add_subplot(122)
-        nat_cover_diffs = compute_neighbor_diffs(self.natural_cover)
-        nat_stego_diffs = compute_neighbor_diffs(self.natural_stego)
-        
-        counts_cover_nat, bins_nat = np.histogram(nat_cover_diffs, bins=np.arange(0, 65), density=True)
-        counts_stego_nat, _ = np.histogram(nat_stego_diffs, bins=np.arange(0, 65), density=True)
-        bin_centers_nat = (bins_nat[:-1] + bins_nat[1:]) / 2
-        
-        ax_nat.plot(bin_centers_nat, counts_cover_nat, color=self.COVER_COLOR, label="Cover", linewidth=2)
-        ax_nat.plot(bin_centers_nat, counts_stego_nat, color=self.STEGO_COLOR, label="Stego", linewidth=2)
-        ax_nat.set_title("Natural Image", fontsize=11, fontweight='bold')
-        ax_nat.set_xlabel("Pixel pair difference", fontsize=10)
-        ax_nat.set_ylabel("Density", fontsize=10)
-        ax_nat.legend(fontsize=9)
-        ax_nat.grid(True, alpha=0.3)
-        
-        figure.suptitle("Distribution of neighbor pixel differences", fontsize=12, fontweight='bold')
+        panel(ax_nat, self.natural_cover, self.natural_stego, self.result.natural.extra, "Natural Image")
+
+        figure.suptitle("Pixel value histogram — before vs after embedding",
+                        fontsize=12, fontweight='bold')
         figure.tight_layout()
-        
+
         canvas = FigureCanvas(figure)
         return canvas
+    
+    
     
     def _create_channel_modification_canvas(self) -> FigureCanvas:
         """Create bar chart showing modified pixels per channel."""
@@ -251,59 +271,70 @@ class PlotDialog(QDialog):
         
         canvas = FigureCanvas(figure)
         return canvas
-    
-    def _create_metric_comparison_canvas(self) -> FigureCanvas:
-        """Create bar chart comparing quality metrics."""
+
+    def _create_rs_group_differences_canvas(self) -> FigureCanvas:
+        """
+        Plots the frequency distribution of the discrimination function values 
+        (local pixel group differences) to compare AI vs Natural image texture profiles.
+        """
         figure = Figure(figsize=(10, 5), dpi=100)
         ax = figure.add_subplot(111)
+
+        group_size = 4
+        name = (self.strategy_name or "").lower()
+        is_lsbmr = "lsbmr" in name
+
+        def get_discrimination_values(arr, extra):
+            """Extracts the appropriate channel and returns its group discrimination vector."""
+            if arr.ndim == 3:
+                if is_lsbmr:
+                    ch = int(extra.get("channel_idx", 0))
+                    channel = arr[:, :, ch]
+                else:
+                    channel = cv2.cvtColor(arr, cv2.COLOR_BGR2GRAY)
+            else:
+                channel = arr
+                
+            flat = channel.flatten()
+            num_groups = len(flat) // group_size
+            groups = flat[:num_groups * group_size].reshape(num_groups, group_size)
+            
+            # Vectorized discrimination calculation: sum of absolute differences between adjacent pixels in groups
+            return np.sum(np.abs(np.diff(groups.astype(np.int32), axis=1)), axis=1)
+
+        # Compute local variations for both cover images
+        ai_diffs = get_discrimination_values(self.ai_cover, self.result.ai.extra)
+        nat_diffs = get_discrimination_values(self.natural_cover, self.result.natural.extra)
+
+        # Establish identical binning for both to guarantee matching coordinates
+        if len(ai_diffs) > 0 and len(nat_diffs) > 0:
+            max_val = max(np.max(ai_diffs), np.max(nat_diffs))
+            # Caps the range reasonably for readability (max difference of 4-pixel block could theoretically be 3*255=765)
+            bins = np.arange(0, min(max_val + 2, 250)) 
+        else:
+            bins = np.arange(0, 100)
+
+        # Plot using 'step' histograms with density=True to normalize for differing image resolutions
+        ax.hist(ai_diffs, bins=bins, histtype='step', linewidth=2.0, 
+                color=self.AI_COLOR, label="AI Image (Cover)", density=True)
+        ax.hist(nat_diffs, bins=bins, histtype='step', linewidth=2.0, 
+                color=self.NATURAL_COLOR, label="Natural Image (Cover)", density=True)
+
+        # Labeling and styling
+        ax.set_title("Local Pixel Group Variance: AI vs Natural Cover Images\n"
+                     "(Calculated via RS Discrimination Function)", fontsize=11, fontweight='bold')
+        ax.set_xlabel("Discrimination value $f(G)$ (Sum of Absolute Differences)", fontsize=10)
+        ax.set_ylabel("Probability Density (Normalized Frequency)", fontsize=10)
+        ax.legend(fontsize=10, loc="upper right")
+        ax.grid(True, alpha=0.3)
         
-        # Get metrics
-        ai_psnr = self.result.ai.psnr
-        ai_ssim = self.result.ai.ssim
-        ai_mse = self.result.ai.mse
-        
-        nat_psnr = self.result.natural.psnr
-        nat_ssim = self.result.natural.ssim
-        nat_mse = self.result.natural.mse
-        
-        # Scale for visualization
-        metrics_labels = ["PSNR (dB)", "SSIM × 100", "MSE × 100"]
-        ai_values = [ai_psnr, ai_ssim * 100, ai_mse * 100]
-        nat_values = [nat_psnr, nat_ssim * 100, nat_mse * 100]
-        
-        # Create grouped bar chart
-        x = np.arange(len(metrics_labels))
-        width = 0.35
-        
-        bars1 = ax.bar(x - width/2, ai_values, width, label="AI", color=self.AI_COLOR, alpha=0.8)
-        bars2 = ax.bar(x + width/2, nat_values, width, label="Natural", color=self.NATURAL_COLOR, alpha=0.8)
-        
-        # Add value labels on bars (unscaled)
-        def add_labels(bars, unscaled_values):
-            for bar, val in zip(bars, unscaled_values):
-                height = bar.get_height()
-                # Determine format based on metric
-                if val < 10:  # SSIM and MSE
-                    fmt = f'{val:.4f}'
-                else:  # PSNR
-                    fmt = f'{val:.2f}'
-                ax.text(bar.get_x() + bar.get_width()/2., height,
-                       fmt, ha='center', va='bottom', fontsize=9)
-        
-        add_labels(bars1, [ai_psnr, ai_ssim, ai_mse])
-        add_labels(bars2, [nat_psnr, nat_ssim, nat_mse])
-        
-        ax.set_ylabel("Metric value (scaled)", fontsize=10, fontweight='bold')
-        ax.set_title("Quality metrics — AI vs Natural", fontsize=12, fontweight='bold')
-        ax.set_xticks(x)
-        ax.set_xticklabels(metrics_labels)
-        ax.legend(fontsize=10)
-        ax.grid(True, alpha=0.3, axis='y')
-        
+        # Crop x-axis dynamically based on data spread to eliminate trailing empty space
+        if len(ai_diffs) > 0 and len(nat_diffs) > 0:
+            high_percentile = max(np.percentile(ai_diffs, 99), np.percentile(nat_diffs, 99))
+            ax.set_xlim(0, high_percentile + 10)
+
         figure.tight_layout()
-        
-        canvas = FigureCanvas(figure)
-        return canvas
+        return FigureCanvas(figure)
     
     def _create_channel_correlation_canvas(self) -> FigureCanvas:
         """Create grouped bar chart showing inter-channel Pearson correlations."""

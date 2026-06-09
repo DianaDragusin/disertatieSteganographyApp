@@ -4,7 +4,7 @@ from typing import Optional
 import cv2
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QMessageBox, QStackedWidget,
-    QMenu, QVBoxLayout,
+    QMenu, QVBoxLayout, QSplitter, QScrollArea,
 )
 from PyQt6.QtCore import Qt
 
@@ -41,28 +41,31 @@ class MainWindow(QMainWindow):
     
     def init_ui(self):
         """Initialize main UI layout with stacked widget for mode switching."""
-        # Create stacked widget to hold single-photo and batch modes
         self.stacked = QStackedWidget()
-        
-        # Single Image mode: left panel + right panel in horizontal layout
-        single_photo_widget = QWidget()
-        single_layout = QHBoxLayout(single_photo_widget)
+
+        # Single Image mode: left panel (self-scrolling, pinned buttons) + right panel
         self.left_panel = LeftPanel()
         self.right_panel = RightPanel()
-        single_layout.addWidget(self.left_panel, stretch=1)
-        single_layout.addWidget(self.right_panel, stretch=2)
-        single_photo_widget.setLayout(single_layout)
-        
-        # Batch mode: batch view
+
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.addWidget(self.left_panel)
+        splitter.addWidget(self.right_panel)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 2)
+        splitter.setSizes([430, 850])
+
+        single_photo_widget = QWidget()
+        single_layout = QHBoxLayout(single_photo_widget)
+        single_layout.setContentsMargins(0, 0, 0, 0)
+        single_layout.addWidget(splitter)
+
+        # Batch mode
         self.batch_view = BatchView()
-        
-        # Add to stacked widget
+
         self.stacked.addWidget(single_photo_widget)  # Index 0
         self.stacked.addWidget(self.batch_view)       # Index 1
-        
-        # Set to single mode by default
         self.stacked.setCurrentIndex(0)
-        
+
         self.setCentralWidget(self.stacked)
         self.connect_signals()
     

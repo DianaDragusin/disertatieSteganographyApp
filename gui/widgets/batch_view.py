@@ -16,7 +16,10 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QColor
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qt5agg import (
+    FigureCanvasQTAgg as FigureCanvas,
+    NavigationToolbar2QT as NavigationToolbar,
+)
 
 from gui.batch_results_index import scan_results, load_audit_detail, format_audit_pass_rate, get_status_icon
 from gui.widgets.batch_plots import (
@@ -57,22 +60,29 @@ class BatchView(QWidget):
         self.refresh_checklist()
 
     def init_ui(self):
-        """Initialize UI layout."""
+        """Initialize UI layout as two top-level tabs:
+        - 'Run Pipeline': the run-from-zero controls + execution progress
+        - 'Results': the CSV-derived plots and report, with the full height
+        """
         main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
 
-        # ── TOP: Checklist and controls ────────────────────────────────────
-        top_widget = self._build_top_section()
-        main_layout.addWidget(top_widget)
+        self.mode_tabs = QTabWidget()
 
-        # ── MIDDLE: Progress and logs ──────────────────────────────────────
-        progress_widget = self._build_progress_section()
-        main_layout.addWidget(progress_widget)
+        # ── Tab 1: Run Pipeline (controls + progress only) ─────────────────
+        run_tab = QWidget()
+        run_layout = QVBoxLayout(run_tab)
+        run_layout.addWidget(self._build_top_section(), stretch=1)
+        run_layout.addWidget(self._build_progress_section())
+        run_tab.setLayout(run_layout)
+        self.mode_tabs.addTab(run_tab, "Run Pipeline")
 
-        # ── BOTTOM: Tabbed results ─────────────────────────────────────────
+        # ── Tab 2: Results (plots + report get the whole window) ───────────
         self.tabs = QTabWidget()
         self._build_result_tabs()
-        main_layout.addWidget(self.tabs, stretch=1)
+        self.mode_tabs.addTab(self.tabs, "Results")
 
+        main_layout.addWidget(self.mode_tabs)
         self.setLayout(main_layout)
 
     def _build_top_section(self) -> QWidget:
@@ -229,13 +239,18 @@ class BatchView(QWidget):
         self.refresh_results()
 
     def _new_canvas_tab(self) -> QWidget:
-        """Create a tab with a blank canvas."""
+        """Canvas fills the tab and scales with the window — fits the screen, no scroll."""
         widget = QWidget()
-        layout = QVBoxLayout()
-        canvas = FigureCanvas(plt.Figure(figsize=(12, 8)))
-        layout.addWidget(canvas)
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        canvas = FigureCanvas(plt.Figure(figsize=(10, 7)))
+        toolbar = NavigationToolbar(canvas, widget)
+
+        layout.addWidget(toolbar)
+        layout.addWidget(canvas, 1)   
         widget.setLayout(layout)
-        widget._canvas = canvas  # Store reference
+        widget._canvas = canvas       
         return widget
 
     def refresh_checklist(self):
@@ -397,10 +412,16 @@ class BatchView(QWidget):
             self.report_text.setText(f"Error: {e}")
 
     def _set_canvas_fig(self, tab_widget, figure):
-        """Replace a tab's canvas figure."""
+        """Swap in a new figure and size it to the canvas so it fits without scrolling."""
         if hasattr(tab_widget, '_canvas'):
-            tab_widget._canvas.figure = figure
-            tab_widget._canvas.draw()
+            canvas = tab_widget._canvas
+            figure.set_canvas(canvas)
+            canvas.figure = figure
+            dpi = figure.get_dpi()
+            w = max(canvas.width(), 1)
+            h = max(canvas.height(), 1)
+            figure.set_size_inches(w / dpi, h / dpi, forward=False)
+            canvas.draw_idle()
 
     def _on_run_clicked(self):
         """Handle run button click."""

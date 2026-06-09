@@ -1,7 +1,7 @@
 """Main application window left panel."""
 from pathlib import Path
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QRadioButton, QButtonGroup,
-    QComboBox, QTextEdit, QPushButton, QProgressBar, QCheckBox, QFileDialog, QMessageBox)
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QRadioButton, QButtonGroup,
+    QComboBox, QTextEdit, QPushButton, QProgressBar, QCheckBox, QFileDialog, QMessageBox, QScrollArea)
 from PyQt6.QtGui import QPixmap, QFont, QImage
 from PyQt6.QtCore import pyqtSignal, Qt
 import cv2
@@ -28,15 +28,17 @@ class LeftPanel(QWidget):
         self.connect_signals()
     
     def init_ui(self):
-        """Initialize UI."""
-        layout = QVBoxLayout()
-        
+        """Scrollable controls on top; progress bar + action buttons pinned at the bottom."""
+        # ── Scrollable content (everything except the action buttons) ──
+        content = QWidget()
+        layout = QVBoxLayout(content)
+
         # Scene selection
         scene_label = QLabel("Scene Type")
         scene_label.setFont(QFont("Arial", 11, QFont.Weight.Bold))
         layout.addWidget(scene_label)
-        
-        scene_group = QButtonGroup()
+
+        scene_group = QButtonGroup(self)
         self.radio_indoor = QRadioButton("Indoor")
         self.radio_outdoor = QRadioButton("Outdoor")
         scene_group.addButton(self.radio_indoor)
@@ -44,95 +46,106 @@ class LeftPanel(QWidget):
         layout.addWidget(self.radio_indoor)
         layout.addWidget(self.radio_outdoor)
         self.radio_indoor.setChecked(True)
-        layout.addSpacing(15)
-        
+        layout.addSpacing(10)
+
         # Image picker
         picker_label = QLabel("Select Image Pair")
         picker_label.setFont(QFont("Arial", 11, QFont.Weight.Bold))
         layout.addWidget(picker_label)
-        
+
         self.image_picker = ImagePickerWidget()
-        layout.addWidget(self.image_picker, stretch=1)
-        
+        self.image_picker.setMinimumHeight(200)
+        layout.addWidget(self.image_picker, stretch=2)
+
         ai_label = QLabel("AI Image Preview")
         ai_label.setFont(QFont("Arial", 10))
         ai_label.setStyleSheet("color: #666;")
         layout.addWidget(ai_label)
-        
+
         self.ai_preview = QLabel()
-        self.ai_preview.setFixedHeight(160)
+        self.ai_preview.setMinimumHeight(180)
         self.ai_preview.setMinimumWidth(180)
         self.ai_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.ai_preview.setStyleSheet("border: 1px solid #ccc; background: #f5f5f5;")
-        layout.addWidget(self.ai_preview)
-        layout.addSpacing(15)
-        
+        layout.addWidget(self.ai_preview, stretch=1)
+        layout.addSpacing(10)
+
         # Strategy selection
         strategy_label = QLabel("Embedding Strategy")
         strategy_label.setFont(QFont("Arial", 11, QFont.Weight.Bold))
         layout.addWidget(strategy_label)
-        
+
         from core.strategy_registry import StrategyRegistry
         self.strategy_combo = QComboBox()
         self.strategy_combo.addItems(StrategyRegistry.get_all_names())
         layout.addWidget(self.strategy_combo)
-        
+
         # LSBMR channel selector (hidden by default)
         self.channel_label = QLabel("LSBMR Channel:")
         self.channel_label.setFont(QFont("Arial", 10))
         self.channel_label.setVisible(False)
         layout.addWidget(self.channel_label)
-        
+
         self.channel_combo = QComboBox()
         self.channel_combo.addItems(["Blue (0)", "Green (1)", "Red (2)"])
         self.channel_combo.setCurrentIndex(0)
         self.channel_combo.setVisible(False)
         layout.addWidget(self.channel_combo)
-        layout.addSpacing(15)
-        
+        layout.addSpacing(10)
+
         # Payload
         payload_label = QLabel("Secret Payload")
         payload_label.setFont(QFont("Arial", 11, QFont.Weight.Bold))
         layout.addWidget(payload_label)
-        
+
         self.payload_toggle = QCheckBox("Load from file")
         layout.addWidget(self.payload_toggle)
-        
+
         self.file_name_label = QLabel()
         self.file_name_label.setStyleSheet("color: #0078d4; font-weight: bold;")
         self.file_name_label.setVisible(False)
         layout.addWidget(self.file_name_label)
-        
+
         self.secret_text = QTextEdit()
         self.secret_text.setPlaceholderText("Enter message...")
         self.secret_text.setFixedHeight(80)
         layout.addWidget(self.secret_text)
-        
+
         self.file_button = QPushButton("Browse...")
         self.file_button.setVisible(False)
         layout.addWidget(self.file_button)
-        layout.addSpacing(15)
-        
-        # Buttons
+
+        layout.addStretch()
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(content)
+
+        # ── Pinned footer: progress bar + action buttons (always visible) ──
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
-        layout.addWidget(self.progress_bar)
-        
+
         self.embed_button = QPushButton("▶ Embed")
         self.embed_button.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-        self.embed_button.setStyleSheet("QPushButton { background-color: #0078d4; color: white; padding: 8px; }")
-        layout.addWidget(self.embed_button)
-        
+        self.embed_button.setStyleSheet(
+            "QPushButton { background-color: #0078d4; color: white; padding: 8px; }")
         self.extract_button = QPushButton("⬅ Extract")
         self.extract_button.setEnabled(False)
-        layout.addWidget(self.extract_button)
-        
         self.plots_button = QPushButton("📊 View Plots")
         self.plots_button.setEnabled(False)
-        layout.addWidget(self.plots_button)
-        
-        layout.addStretch()
-        self.setLayout(layout)
+
+        button_row = QHBoxLayout()
+        button_row.addWidget(self.embed_button)
+        button_row.addWidget(self.extract_button)
+        button_row.addWidget(self.plots_button)
+
+        # ── Assemble: scrollable controls (grow) + fixed footer ──
+        outer = QVBoxLayout()
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll, 1)
+        outer.addWidget(self.progress_bar)
+        outer.addLayout(button_row)
+        self.setLayout(outer)
     
     def connect_signals(self):
         """Connect internal signals."""
