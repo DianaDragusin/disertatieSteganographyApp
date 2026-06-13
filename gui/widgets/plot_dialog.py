@@ -274,18 +274,17 @@ class PlotDialog(QDialog):
 
     def _create_rs_group_differences_canvas(self) -> FigureCanvas:
         """
-        Plots the frequency distribution of the discrimination function values 
-        (local pixel group differences) to compare AI vs Natural image texture profiles.
+        Two side-by-side subplots: left = cover baseline (AI vs Natural),
+        right = stego after embedding (AI vs Natural). Same colours each side
+        so the shift between panels is immediately readable.
         """
-        figure = Figure(figsize=(10, 5), dpi=100)
-        ax = figure.add_subplot(111)
+        figure = Figure(figsize=(12, 5), dpi=100)
 
         group_size = 4
         name = (self.strategy_name or "").lower()
         is_lsbmr = "lsbmr" in name
 
         def get_discrimination_values(arr, extra):
-            """Extracts the appropriate channel and returns its group discrimination vector."""
             if arr.ndim == 3:
                 if is_lsbmr:
                     ch = int(extra.get("channel_idx", 0))
@@ -294,45 +293,46 @@ class PlotDialog(QDialog):
                     channel = cv2.cvtColor(arr, cv2.COLOR_BGR2GRAY)
             else:
                 channel = arr
-                
             flat = channel.flatten()
             num_groups = len(flat) // group_size
             groups = flat[:num_groups * group_size].reshape(num_groups, group_size)
-            
-            # Vectorized discrimination calculation: sum of absolute differences between adjacent pixels in groups
             return np.sum(np.abs(np.diff(groups.astype(np.int32), axis=1)), axis=1)
 
-        # Compute local variations for both cover images
-        ai_diffs = get_discrimination_values(self.ai_cover, self.result.ai.extra)
-        nat_diffs = get_discrimination_values(self.natural_cover, self.result.natural.extra)
+        ai_cover_diffs  = get_discrimination_values(self.ai_cover,      self.result.ai.extra)
+        ai_stego_diffs  = get_discrimination_values(self.ai_stego,      self.result.ai.extra)
+        nat_cover_diffs = get_discrimination_values(self.natural_cover,  self.result.natural.extra)
+        nat_stego_diffs = get_discrimination_values(self.natural_stego,  self.result.natural.extra)
 
-        # Establish identical binning for both to guarantee matching coordinates
-        if len(ai_diffs) > 0 and len(nat_diffs) > 0:
-            max_val = max(np.max(ai_diffs), np.max(nat_diffs))
-            # Caps the range reasonably for readability (max difference of 4-pixel block could theoretically be 3*255=765)
-            bins = np.arange(0, min(max_val + 2, 250)) 
+        all_diffs = [d for d in [ai_cover_diffs, ai_stego_diffs,
+                                  nat_cover_diffs, nat_stego_diffs] if len(d) > 0]
+        if all_diffs:
+            max_val = max(np.max(d) for d in all_diffs)
+            bins = np.arange(0, min(max_val + 2, 250))
         else:
             bins = np.arange(0, 100)
 
-        # Plot using 'step' histograms with density=True to normalize for differing image resolutions
-        ax.hist(ai_diffs, bins=bins, histtype='step', linewidth=2.0, 
-                color=self.AI_COLOR, label="AI Image (Cover)", density=True)
-        ax.hist(nat_diffs, bins=bins, histtype='step', linewidth=2.0, 
-                color=self.NATURAL_COLOR, label="Natural Image (Cover)", density=True)
+        xlim = (0, max(np.percentile(d, 99) for d in all_diffs) + 10) if all_diffs else (0, 100)
 
-        # Labeling and styling
-        ax.set_title("Local Pixel Group Variance: AI vs Natural Cover Images\n"
-                     "(Calculated via RS Discrimination Function)", fontsize=11, fontweight='bold')
-        ax.set_xlabel("Discrimination value $f(G)$ (Sum of Absolute Differences)", fontsize=10)
-        ax.set_ylabel("Probability Density (Normalized Frequency)", fontsize=10)
-        ax.legend(fontsize=10, loc="upper right")
-        ax.grid(True, alpha=0.3)
-        
-        # Crop x-axis dynamically based on data spread to eliminate trailing empty space
-        if len(ai_diffs) > 0 and len(nat_diffs) > 0:
-            high_percentile = max(np.percentile(ai_diffs, 99), np.percentile(nat_diffs, 99))
-            ax.set_xlim(0, high_percentile + 10)
+        figure.clear()
+        ax_cover, ax_stego = figure.subplots(1, 2, sharey=True)
 
+        for ax, title, ai_d, nat_d in [
+            (ax_cover,  "Cover images (no embedding)", ai_cover_diffs,  nat_cover_diffs),
+            (ax_stego,  "Stego images (after embedding)", ai_stego_diffs, nat_stego_diffs),
+        ]:
+            ax.hist(ai_d,  bins=bins, histtype='step', linewidth=2.0,
+                    color=self.AI_COLOR,      label="AI",      density=True)
+            ax.hist(nat_d, bins=bins, histtype='step', linewidth=2.0,
+                    color=self.NATURAL_COLOR, label="Natural", density=True)
+            ax.set_title(title, fontsize=10, fontweight='bold')
+            ax.set_xlabel("Discrimination value $f(G)$", fontsize=9)
+            ax.set_xlim(*xlim)
+            ax.legend(fontsize=9, loc="upper right")
+            ax.grid(True, alpha=0.3)
+
+        ax_cover.set_ylabel("Probability Density (Normalized Frequency)", fontsize=9)
+        figure.suptitle("RS Discrimination Function: AI vs Natural",
+                        fontsize=11, fontweight='bold')
         figure.tight_layout()
         return FigureCanvas(figure)
     

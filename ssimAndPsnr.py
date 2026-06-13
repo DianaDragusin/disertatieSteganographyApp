@@ -1,10 +1,8 @@
 import numpy as np
-
-import numpy as np
-from scipy.ndimage import convolve
-
+# import numpy as np  # duplicate
+# from scipy.ndimage import convolve  # unused — replaced by cv2.GaussianBlur below
 import cv2
-import numpy as np
+# import numpy as np  # duplicate
 
 def calculate_ssim(f, g, window_size=11):
     # Determine if we need to process multiple channels

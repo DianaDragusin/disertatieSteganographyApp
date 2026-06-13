@@ -142,11 +142,6 @@ class MetricsTableWidget(QWidget):
         
         self.table.setItem(8, 1, ai_winner_item)
         self.table.setItem(8, 2, natural_winner_item)
-        
-        self.table.resizeRowsToContents()
-
-        self.table.setItem(8, 1, ai_winner_item)
-        self.table.setItem(8, 2, natural_winner_item)
 
         self.table.resizeRowsToContents()
         self.caption.setText(result.formula_caption())     

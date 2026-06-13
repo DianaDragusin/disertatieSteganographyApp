@@ -16,17 +16,14 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QColor
-from matplotlib.backends.backend_qt5agg import (
-    FigureCanvasQTAgg as FigureCanvas,
-    NavigationToolbar2QT as NavigationToolbar,
-)
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 
 from gui.batch_results_index import scan_results, load_audit_detail, format_audit_pass_rate, get_status_icon
 from gui.widgets.batch_plots import (
     fig_quality_2x2, fig_chi2_2x2, fig_rs_2x2, fig_pairdiff_2x2,
 )
 from gui.widgets.batch_report import (
-    aggregate, fig_tradeoff, fig_rank_heatmap, build_verdict_text,
+    aggregate, fig_rank_heatmap, build_verdict_text,
 )
 from batch_runner import STRATEGY_TABLE
 
@@ -207,7 +204,6 @@ class BatchView(QWidget):
         self.tab_chi2 = self._new_canvas_tab()
         self.tab_rs = self._new_canvas_tab()
         self.tab_pairdiff = self._new_canvas_tab()
-        self.tab_tradeoff = self._new_canvas_tab()
         self.tab_rank_imp = self._new_canvas_tab()
         self.tab_rank_und = self._new_canvas_tab()
 
@@ -217,7 +213,6 @@ class BatchView(QWidget):
         self.tabs.addTab(self.tab_chi2, "Chi-square")
         self.tabs.addTab(self.tab_rs, "RS Analysis")
         self.tabs.addTab(self.tab_pairdiff, "Pair-diff")
-        self.tabs.addTab(self.tab_tradeoff, "Tradeoff")
         self.tabs.addTab(self.tab_rank_imp, "Ranking (Imperceptibility)")
         self.tabs.addTab(self.tab_rank_und, "Ranking (Undetectability)")
 
@@ -245,12 +240,10 @@ class BatchView(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         canvas = FigureCanvas(plt.Figure(figsize=(10, 7)))
-        toolbar = NavigationToolbar(canvas, widget)
 
-        layout.addWidget(toolbar)
-        layout.addWidget(canvas, 1)   
+        layout.addWidget(canvas, 1)
         widget.setLayout(layout)
-        widget._canvas = canvas       
+        widget._canvas = canvas
         return widget
 
     def refresh_checklist(self):
@@ -398,7 +391,6 @@ class BatchView(QWidget):
                                 _pairdiff_placeholder_figure())
 
             if not self.current_agg.empty:
-                self._set_canvas_fig(self.tab_tradeoff, fig_tradeoff(self.current_agg))
                 self._set_canvas_fig(self.tab_rank_imp,
                                     fig_rank_heatmap(self.current_agg, "imperceptibility"))
                 self._set_canvas_fig(self.tab_rank_und,
@@ -494,11 +486,9 @@ class BatchView(QWidget):
             return
         self._pairdiff_rendered = True
 
-        # Show a transient 'computing...' message, then render.
         self._set_canvas_fig(self.tab_pairdiff,
                              _pairdiff_placeholder_figure(
                                  message="Computing pair-difference histograms..."))
-        # Force the placeholder to paint before the heavy work starts.
         from PyQt6.QtWidgets import QApplication
         QApplication.processEvents()
 

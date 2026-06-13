@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.stats import chi2
-import numpy as np
+# import numpy as np  # duplicate
 import pandas as pd
 import cv2
 from scipy.stats import chi2_contingency, chisquare
@@ -106,4 +106,3 @@ def analyze_stego_image(image_path):
     else:
         print("\nConclusion: No strong evidence of LSB steganography.")
 
-analyze_stego_image('C:\\Users\\Diana\\Desktop\\disertatie\\CodeFunctional\\embeddings\\lsb_embeddings\\ai\\50\\2.png')

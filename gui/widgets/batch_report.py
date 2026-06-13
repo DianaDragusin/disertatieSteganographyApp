@@ -83,50 +83,6 @@ def compute_rankings(agg: pd.DataFrame) -> dict:
     return rankings
 
 
-def fig_tradeoff(agg: pd.DataFrame) -> Figure:
-    """
-    Tradeoff scatter: X = PSNR (imperceptibility), Y = Estimated_Length_P (detectability).
-    One marker per method, faceted 2x2 (Indoor/Outdoor x AI/Natural).
-    """
-    if agg.empty:
-        fig = Figure(figsize=(12, 10))
-        ax = fig.add_subplot(111)
-        ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
-        return fig
-
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
-    fig.suptitle("Imperceptibility-Detectability Tradeoff", fontsize=14, fontweight="bold")
-
-    for idx_place, place in enumerate(sorted(agg["Place"].unique())):
-        for idx_type, img_type in enumerate(sorted(agg["ImageType"].unique())):
-            row, col = (0 if img_type == "AI" else 1, 
-                        0 if place == "indoor" else 1)
-            ax = axes[row, col]
-
-            cond_data = agg[(agg["Place"] == place) & (agg["ImageType"] == img_type)]
-
-            for strategy in cond_data["Strategy"].unique():
-                s_data = cond_data[cond_data["Strategy"] == strategy]
-                avg_psnr = s_data["PSNR"].mean()
-                avg_p_est = s_data["Estimated_Length_P"].mean()
-
-                ax.scatter(avg_psnr, avg_p_est, s=200, alpha=0.7,
-                          color=STRATEGY_COLORS.get(strategy, "#000000"),
-                          label=STRATEGY_LABELS.get(strategy, strategy))
-
-            ax.set_xlabel("PSNR (↑ imperceptible)")
-            ax.set_ylabel("Est. Payload P (↓ undetectable)")
-            ax.set_title(f"{place.capitalize()} — {img_type}")
-            ax.grid(True, alpha=0.3)
-
-    handles, labels = axes[0, 0].get_legend_handles_labels()
-    if handles:
-        fig.legend(handles, labels, loc="upper center", ncol=4,
-                   bbox_to_anchor=(0.5, -0.02), frameon=True)
-
-    plt.tight_layout(rect=[0, 0.03, 1, 0.98])
-    return fig
-
 def _minmax(values):
     """Scale to [0,1]. If all values are equal, treat as a tie (all 1.0)."""
     v = np.asarray(values, dtype=float)

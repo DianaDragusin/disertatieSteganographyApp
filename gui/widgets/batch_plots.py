@@ -27,8 +27,10 @@ no caching). The old multi-image capped version was replaced.
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 from typing import Optional
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pandas as pd
@@ -459,6 +461,42 @@ def _pairdiff_counts_from_path(path: Path, bins: np.ndarray) -> Optional[np.ndar
     return counts.astype(np.float64)
 
 
+# libpng writes errors straight to C-level stderr (not Python's sys.stderr).
+# We silence them by redirecting fd 2 to nul around every imread call.
+# A lock ensures threads don't race on the fd redirect.
+_stderr_lock = threading.Lock()
+
+
+def _imread_silent(path: Path, flags: int) -> Optional[np.ndarray]:
+    """cv2.imread with C-level stderr suppressed to hide libpng read errors."""
+    with _stderr_lock:
+        devnull_fd = os.open(os.devnull, os.O_WRONLY)
+        saved = os.dup(2)
+        os.dup2(devnull_fd, 2)
+        try:
+            img = cv2.imread(str(path), flags)
+        finally:
+            os.dup2(saved, 2)
+            os.close(saved)
+            os.close(devnull_fd)
+    return img
+
+
+def _read_gray(path: Path) -> Optional[np.ndarray]:
+    return _imread_silent(path, cv2.IMREAD_GRAYSCALE)
+
+
+def _read_color(path: Path) -> Optional[np.ndarray]:
+    return _imread_silent(path, cv2.IMREAD_COLOR)
+
+
+def _parallel_read(path_map: dict, max_workers: int = 16) -> dict:
+    """Read all paths in parallel. path_map: key -> Path. Returns key -> ndarray|None."""
+    with ThreadPoolExecutor(max_workers=min(max_workers, max(1, len(path_map)))) as ex:
+        futures = {ex.submit(_read_gray, p): k for k, p in path_map.items()}
+        return {k: f.result() for f, k in futures.items()}
+
+
 def fig_pairdiff_2x2(strategies: list[str], places: list[str],
                      image_name: str = "1.png", payload_kb: Optional[int] = None,
                      cover_folders: Optional[dict] = None) -> Figure:
@@ -488,19 +526,57 @@ def fig_pairdiff_2x2(strategies: list[str], places: list[str],
             return _empty_figure("Pair-Difference Showcase",
                                  f"Cannot resolve cover folders: {exc}")
 
-    # Per-pixel difference bins: d = stego - cover, integer-centred and symmetric.
     diff_bins = np.arange(-32.5, 33.5, 1.0)
     diff_centers = np.arange(-32, 33)
 
-    # Panels: image-type major, place minor (up to 4 rows; adapts if fewer places).
     panels = [(place, img_type)
               for img_type in ("AI", "Natural")
               for place in places]
     if not panels:
         return _empty_figure("Pair-Difference Showcase", "No places selected.")
 
+    # ── Phase 1: resolve all paths ────────────────────────────────────────────
+    # Maps key -> Path for every image we'll need.
+    gray_jobs: dict[tuple, Path] = {}
+    color_jobs: dict[tuple, Path] = {}  # cover color thumbnails
+    stego_dirs: dict[tuple, list[Path]] = {}  # (row, strategy) -> [kb_dir, ...]
+
+    for row, (place, img_type) in enumerate(panels):
+        img_type_lower = img_type.lower()
+        cover_folder = cover_folders.get((place, img_type_lower))
+        cover_path = (cover_folder / image_name) if cover_folder else None
+        if cover_path and cover_path.exists():
+            gray_jobs[("cover", row)] = cover_path
+            color_jobs[("cover", row)] = cover_path
+
+        for strategy in strategies:
+            stego_folder = _stego_folder_for_pair_diff(strategy, place, img_type_lower)
+            if stego_folder is None:
+                continue
+            if payload_kb is not None:
+                kb_dirs = [stego_folder / str(payload_kb)] if (stego_folder / str(payload_kb)).is_dir() else []
+            else:
+                kb_dirs = sorted((p for p in stego_folder.iterdir()
+                                  if p.is_dir() and p.name.isdigit()),
+                                 key=lambda p: int(p.name))
+            stego_dirs[(row, strategy)] = kb_dirs
+            for i, kb_dir in enumerate(kb_dirs):
+                p = kb_dir / image_name
+                gray_jobs[("stego", row, strategy, i)] = p
+
+    # ── Phase 2: read all images in parallel ──────────────────────────────────
+    gray_imgs = _parallel_read(gray_jobs)
+
+    # Color covers read separately (can reuse the grayscale arrays for math)
+    color_imgs: dict = {}
+    if color_jobs:
+        with ThreadPoolExecutor(max_workers=min(16, len(color_jobs))) as ex:
+            futs = {ex.submit(_read_color, p): k for k, p in color_jobs.items()}
+            color_imgs = {k: f.result() for f, k in futs.items()}
+
+    # ── Phase 3: render ───────────────────────────────────────────────────────
     n_rows = len(panels)
-    fig, axes = plt.subplots(n_rows, 2, figsize=(11, 2.6 * n_rows),
+    fig, axes = plt.subplots(n_rows, 2, figsize=(12, 3.0 * n_rows),
                              gridspec_kw={"width_ratios": [3, 1]},
                              squeeze=False)
     present: set[str] = set()
@@ -509,49 +585,29 @@ def fig_pairdiff_2x2(strategies: list[str], places: list[str],
         ax_plot = axes[row, 0]
         ax_img = axes[row, 1]
         ax_img.axis("off")
-        img_type_lower = img_type.lower()
         ax_plot.set_title(f"{place.capitalize()} — {img_type}", fontsize=11)
         ax_plot.grid(True, alpha=0.3, which="both")
-        ax_plot.set_yscale("log")          # LSB footprints are tiny; log makes them visible
-        ax_plot.set_ylabel("Density of (stego − cover)  [log]")
-        if row == n_rows - 1:
-            ax_plot.set_xlabel("Per-pixel change (stego − cover)")
+        ax_plot.set_yscale("log")
+        # Tick labels only — shared axis labels added via fig.text below
+        ax_plot.tick_params(axis="both", labelsize=9)
 
-        cover_folder = cover_folders.get((place, img_type_lower))
-        cover_path = (cover_folder / image_name) if cover_folder else None
-        if cover_path is None or not cover_path.exists():
+        cover_gray = gray_imgs.get(("cover", row))
+        if cover_gray is None:
             ax_plot.text(0.5, 0.5, f"cover {image_name} not found", ha="center",
                          va="center", transform=ax_plot.transAxes, color="gray")
             continue
-
-        cover_gray = cv2.imread(str(cover_path), cv2.IMREAD_GRAYSCALE)
-        if cover_gray is None:
-            ax_plot.text(0.5, 0.5, "cover unreadable", ha="center", va="center",
-                         transform=ax_plot.transAxes, color="gray")
-            continue
         cover_gray = cover_gray.astype(np.int16)
 
-        # Cover image (color) beside the plot for context.
-        cov_color = cv2.imread(str(cover_path), cv2.IMREAD_COLOR)
+        cov_color = color_imgs.get(("cover", row))
         if cov_color is not None:
             ax_img.imshow(cv2.cvtColor(cov_color, cv2.COLOR_BGR2RGB))
             ax_img.set_title(image_name, fontsize=8)
 
-        # One line per method: histogram of the PER-PIXEL change (stego - cover),
-        # pooled across ALL payload folders for this image. This directly shows each
-        # method's embedding footprint (LSB methods => ±1; PVD => much wider).
         for strategy in strategies:
-            stego_folder = _stego_folder_for_pair_diff(strategy, place, img_type_lower)
-            if stego_folder is None:
-                continue
-
-            kb_dirs = sorted((p for p in stego_folder.iterdir()
-                              if p.is_dir() and p.name.isdigit()),
-                             key=lambda p: int(p.name))
-
+            kb_dirs = stego_dirs.get((row, strategy), [])
             pooled = np.zeros(len(diff_bins) - 1, dtype=np.float64)
-            for kb_dir in kb_dirs:
-                stego = cv2.imread(str(kb_dir / image_name), cv2.IMREAD_GRAYSCALE)
+            for i, _kb_dir in enumerate(kb_dirs):
+                stego = gray_imgs.get(("stego", row, strategy, i))
                 if stego is None or stego.shape != cover_gray.shape:
                     continue
                 d = stego.astype(np.int16) - cover_gray
@@ -561,15 +617,14 @@ def fig_pairdiff_2x2(strategies: list[str], places: list[str],
             total = pooled.sum()
             if total == 0:
                 continue
-            density = pooled / total                       # bin width = 1
-            density = np.where(density > 0, density, np.nan)  # log skips empty bins
+            density = pooled / total
+            density = np.where(density > 0, density, np.nan)
             ax_plot.plot(diff_centers, density,
                          color=STRATEGY_COLORS.get(strategy, "#000000"),
                          linewidth=1.8,
                          label=STRATEGY_LABELS.get(strategy, strategy))
             present.add(strategy)
 
-    # Shared figure legend (method order preserved).
     if present:
         from matplotlib.lines import Line2D
         ordered = [s for s in strategies if s in present]
@@ -581,8 +636,15 @@ def fig_pairdiff_2x2(strategies: list[str], places: list[str],
 
     fig.suptitle(f"Per-pixel Difference (stego − cover) — {image_name} @ all payloads pooled "
                  f"(LSBMR = blue channel)", fontsize=13, fontweight="bold")
-    fig.tight_layout(rect=[0.0, 0.04, 1.0, 0.96])
+
+    # Shared axis labels that don't collide with subplot content
+    fig.text(0.02, 0.5, "Density of (stego − cover)  [log scale]",
+             va="center", ha="center", rotation="vertical", fontsize=10)
+    fig.text(0.46, 0.02, "Per-pixel change (stego − cover)", ha="center", fontsize=10)
+
+    fig.tight_layout(rect=[0.05, 0.07, 1.0, 0.95])
     return fig
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
